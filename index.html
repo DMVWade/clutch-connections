@@ -3617,8 +3617,7 @@ function renderResult(){
       html += `<button class="lock" style="margin-top:10px;background:var(--surface2);color:var(--text)" onclick="openAccount()">Sign in to save your streak</button>`;
     }
     html += `<div class="best-note">Your total: ${total.toFixed(1)} PRA · Best possible today: ~${best.toFixed(1)}</div>
-      <div class="countdown" id="cd"></div>
-      <button onclick="resetToday()" style="margin-top:14px;background:none;border:1px dashed var(--line);color:var(--muted);padding:8px 14px;border-radius:8px;font-size:12px;cursor:pointer;font-family:inherit">↺ Replay today (dev)</button>`;
+      <div class="countdown" id="cd"></div>`;
   }
   html += `</div>`;
 
