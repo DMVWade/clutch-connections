@@ -159,6 +159,19 @@
   .score-val .n{font-family:'Anton',sans-serif; font-size:54px; line-height:.9;}
   .score-val .o{font-size:12px; color:var(--muted); letter-spacing:1px;}
   .pct{font-size:15px; margin:6px 0 2px;}
+  .auth-tabs{display:flex; gap:8px; margin-bottom:12px;}
+  .auth-tab{flex:1; padding:9px; border-radius:9px; border:1px solid var(--line); background:var(--surface2); color:var(--muted); font-weight:700; font-size:13.5px; cursor:pointer; font-family:inherit;}
+  .auth-tab.on{background:var(--blue); color:#fff; border-color:var(--blue);}
+  .auth-in{width:100%; box-sizing:border-box; background:var(--surface2); border:1px solid var(--line); color:var(--text); padding:12px; border-radius:10px; font-size:15px; font-family:inherit; outline:none; margin-bottom:10px;}
+  .auth-msg{font-size:13px; color:var(--red); min-height:18px; margin-bottom:6px;}
+  .lb-box{margin-top:16px; width:100%;}
+  .lb-title{font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:10px 0 6px; font-weight:700;}
+  .lb-note{font-size:13px; color:var(--muted); margin:8px 0;}
+  .lb-row{display:flex; align-items:center; gap:10px; padding:8px 12px; border:1px solid var(--line); border-radius:9px; margin-bottom:6px; background:var(--surface);}
+  .lb-rank{width:22px; color:var(--muted); font-weight:700; font-family:'JetBrains Mono',monospace;}
+  .lb-user{flex:1; font-weight:600; text-align:left;}
+  .lb-score{font-weight:800; color:var(--blue); font-family:'JetBrains Mono',monospace;}
+  .linkbtn{background:none; border:none; color:var(--blue); font-weight:700; cursor:pointer; padding:0; font-family:inherit; font-size:13px; text-decoration:underline;}
   .pct b{color:var(--blue); font-family:'JetBrains Mono',monospace;}
   .grade{font-family:'Anton',sans-serif; font-size:22px; text-transform:uppercase; letter-spacing:1px; margin-bottom:14px;}
   .result-lineup{display:flex; flex-direction:column; gap:6px; margin-bottom:16px; text-align:left;}
@@ -231,7 +244,7 @@
       <li>Fill all five positions — PG, SG, SF, PF, C. Each player can only take a spot they actually played.</li>
       <li>Once you pick a player you're committed — you can change their position, but can't swap them out. Choose carefully.</li>
       <li>Your score is the sum of each player's best single-season PRA (points + rebounds + assists).</li>
-      <li>One lineup a day. Same letters for everyone. See what percentile you land in.</li>
+      <li>One lineup a day. Same letters for everyone, everywhere.</li>
     </ol>
     <div class="ex">
       Example — letters <b>L J</b>:<br>
@@ -253,6 +266,7 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ============================================================
    CLUTCH CONNECTIONS
@@ -3138,6 +3152,14 @@ function save(state){
   try{ if(_store){ _store.setItem("ccv2_"+todayStr, JSON.stringify(state)); return; } }catch(e){}
   _mem["ccv2_"+todayStr] = state;
 }
+function seenHelp(){
+  try{ if(_store){ return _store.getItem("cc_seenhelp")==="1"; } }catch(e){}
+  return _mem["cc_seenhelp"]==="1";
+}
+function markSeenHelp(){
+  try{ if(_store){ _store.setItem("cc_seenhelp","1"); } }catch(e){}
+  _mem["cc_seenhelp"] = "1";
+}
 
 /* ---------- theme ---------- */
 let theme = "dark";
@@ -3162,64 +3184,107 @@ function loadTheme(){
   applyTheme();
 }
 
-/* ---------- accounts (local profiles; real cross-device needs a backend) ---------- */
-let user = null;  // active profile object or null
+/* ---------- accounts + leaderboard via Supabase ---------- */
+const SUPA_URL = "https://rtkmgivocdokkskjshhz.supabase.co";
+const SUPA_KEY = "sb_publishable_sFvK1vXRy4M70uoHO-2znA_ZP87MMLO";
+let sb = null;
+try { if(window.supabase && window.supabase.createClient) sb = window.supabase.createClient(SUPA_URL, SUPA_KEY); } catch(e){}
+function backendReady(){ return !!sb; }
 
-function profKey(name){ return "ccp_" + name.toLowerCase().trim(); }
-function loadProfile(name){
-  let raw=null;
-  try{ if(_store){ raw = _store.getItem(profKey(name)); } }catch(e){}
-  if(!raw) raw = _mem[profKey(name)] ? JSON.stringify(_mem[profKey(name)]) : null;
-  if(raw){ try{ return JSON.parse(raw); }catch(e){} }
-  return { name:name.trim(), games:0, total:0, best:0, streak:0, lastDate:null };
-}
-function saveProfile(p){
-  const k = profKey(p.name);
-  try{ if(_store){ _store.setItem(k, JSON.stringify(p)); } }catch(e){}
-  _mem[k] = p;
-}
-function setActiveUser(name){
-  try{ if(_store){ _store.setItem("cc_user", name); } }catch(e){}
-  _mem["cc_user"] = name;
-}
-function signIn(name){
-  if(!name || !name.trim()) return;
-  user = loadProfile(name);
-  setActiveUser(user.name);
-  closeModal("accountModal");
-  // if today's daily is already finished, record it now
-  if(mode==="daily" && locked){
-    try{ recordDaily(computeScore().score100); }catch(e){}
-  }
-  render();
-}
-function signOut(){
-  user = null;
-  try{ if(_store){ _store.removeItem("cc_user"); } }catch(e){}
-  delete _mem["cc_user"];
-  closeModal("accountModal");
-  render();
-}
-function loadActiveUser(){
-  let name=null;
-  try{ if(_store){ name = _store.getItem("cc_user"); } }catch(e){}
-  if(!name) name = _mem["cc_user"];
-  if(name) user = loadProfile(name);
-}
+let user = null;       // {id, username, games, total, best, streak} when logged in
+let authBusy = false;
+let authTab = "login";
+
 function yesterdayStr(){
   const d = new Date(); d.setUTCDate(d.getUTCDate()-1);
   return d.toISOString().slice(0,10);
 }
-/* record a completed DAILY game into the active profile (once per day) */
-function recordDaily(score100){
-  if(!user) return;
-  if(user.lastDate === todayStr) return;       // already counted today
-  user.games += 1;
-  user.total += score100;
-  user.best = Math.max(user.best, score100);
-  user.streak = (user.lastDate === yesterdayStr()) ? user.streak + 1 : 1;
-  user.lastDate = todayStr;
-  saveProfile(user);
+function computeStreakFromDays(days){
+  const set = new Set(days);
+  const d = new Date();
+  let cur = d.toISOString().slice(0,10);
+  if(!set.has(cur)){ d.setUTCDate(d.getUTCDate()-1); cur = d.toISOString().slice(0,10); if(!set.has(cur)) return 0; }
+  let streak = 0;
+  while(set.has(cur)){ streak++; d.setUTCDate(d.getUTCDate()-1); cur = d.toISOString().slice(0,10); }
+  return streak;
+}
+async function refreshUserStats(){
+  if(!sb || !user) return;
+  try{
+    const { data, error } = await sb.from("scores").select("day,score").eq("user_id", user.id);
+    if(error || !data) return;
+    user.games = data.length;
+    user.total = data.reduce((s,r)=>s+r.score,0);
+    user.best  = data.reduce((m,r)=>Math.max(m,r.score),0);
+    user.streak = computeStreakFromDays(data.map(r=>r.day));
+  }catch(e){}
+}
+async function fetchUsername(uid){
+  try{ const { data } = await sb.from("profiles").select("username").eq("id",uid).maybeSingle(); if(data&&data.username) return data.username; }catch(e){}
+  return "Player";
+}
+async function loadSession(){
+  if(!sb) return;
+  try{
+    const { data:{ session } } = await sb.auth.getSession();
+    if(session && session.user){
+      user = { id:session.user.id, username: await fetchUsername(session.user.id), games:0, total:0, best:0, streak:0 };
+      await refreshUserStats();
+      render();
+    }
+  }catch(e){}
+}
+function authMsg(m){ try{ const el=document.getElementById("authMsg"); if(el) el.textContent = m||""; }catch(e){} }
+
+async function doSignup(username, email, password){
+  if(authBusy || !sb) return;
+  username=(username||"").trim(); email=(email||"").trim();
+  if(username.length<2){ authMsg("Pick a username (at least 2 characters)."); return; }
+  if(!email || !password || password.length<6){ authMsg("Enter an email and a password (6+ characters)."); return; }
+  authBusy=true; authMsg("Creating account…");
+  try{
+    const { data, error } = await sb.auth.signUp({ email, password });
+    if(error){ authBusy=false; authMsg(error.message); return; }
+    const uid = (data.user && data.user.id) || (data.session && data.session.user && data.session.user.id);
+    const { error: perr } = await sb.from("profiles").insert({ id: uid, username });
+    if(perr){
+      authBusy=false;
+      authMsg(/duplicate|unique/i.test(perr.message||"") ? "That username is taken — try another." : perr.message);
+      try{ await sb.auth.signOut(); }catch(e){}
+      return;
+    }
+    user = { id:uid, username, games:0, total:0, best:0, streak:0 };
+    authBusy=false; closeModal("accountModal");
+    if(mode==="daily" && locked) await submitDaily();
+    await refreshUserStats(); render();
+  }catch(e){ authBusy=false; authMsg("Something went wrong — try again."); }
+}
+async function doLogin(email, password){
+  if(authBusy || !sb) return;
+  email=(email||"").trim();
+  if(!email || !password){ authMsg("Enter your email and password."); return; }
+  authBusy=true; authMsg("Signing in…");
+  try{
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+    if(error){ authBusy=false; authMsg(error.message); return; }
+    user = { id:data.user.id, username: await fetchUsername(data.user.id), games:0, total:0, best:0, streak:0 };
+    authBusy=false; closeModal("accountModal");
+    if(mode==="daily" && locked) await submitDaily();
+    await refreshUserStats(); render();
+  }catch(e){ authBusy=false; authMsg("Something went wrong — try again."); }
+}
+async function signOut(){
+  try{ if(sb) await sb.auth.signOut(); }catch(e){}
+  user = null; closeModal("accountModal"); render();
+}
+/* submit today's daily score once; unique(user_id,day) guards duplicates */
+async function submitDaily(){
+  if(!sb || !user) return;
+  try{
+    const { score100, total } = computeScore();
+    await sb.from("scores").insert({ user_id:user.id, username:user.username, day:todayStr, score:score100, total:Number(total.toFixed(1)), letters:L1+" "+L2 });
+  }catch(e){}
+  await refreshUserStats();
 }
 
 /* ---------- modal helpers ---------- */
@@ -3228,10 +3293,14 @@ function closeModal(id){ document.getElementById(id).classList.remove("show"); }
 function openAccount(){
   try{ document.getElementById("acctLogo").src = LOGO; }catch(e){}
   const body = document.getElementById("accountBody");
+  if(!backendReady()){
+    body.innerHTML = `<p style="font-size:13.5px;color:var(--muted);margin:0">Accounts &amp; leaderboard run on the live site — they're turned off in this preview window.</p>`;
+    openModal("accountModal"); return;
+  }
   if(user){
     const avg = user.games ? Math.round(user.total/user.games) : 0;
     body.innerHTML = `
-      <div class="acct-name">${user.name}</div>
+      <div class="acct-name">${escapeHtml(user.username)}</div>
       <div class="stat-grid">
         <div class="stat"><div class="stat-n">${user.streak}</div><div class="stat-l">Day streak</div></div>
         <div class="stat"><div class="stat-n">${user.games}</div><div class="stat-l">Played</div></div>
@@ -3240,15 +3309,39 @@ function openAccount(){
       </div>
       <button class="help-close" style="background:var(--surface2);color:var(--text);margin-top:6px" onclick="signOut()">Sign out</button>`;
   }else{
+    authTab = "login";
     body.innerHTML = `
-      <p style="font-size:13.5px;color:var(--muted);margin:0 0 12px">Sign in with a name to track your daily streak, average and best score. Stored on this device.</p>
-      <input id="nameInput" type="text" placeholder="Your name" autocomplete="off"
-        style="width:100%;background:var(--surface2);border:1px solid var(--line);color:var(--text);padding:12px;border-radius:10px;font-size:15px;font-family:inherit;outline:none;margin-bottom:12px"
-        onkeydown="if(event.key==='Enter')signIn(this.value)">
-      <button class="help-close" onclick="signIn(document.getElementById('nameInput').value)">Start tracking</button>`;
+      <p style="font-size:13.5px;color:var(--muted);margin:0 0 12px">Log in to save your streak and climb the daily leaderboard — works across all your devices.</p>
+      <div class="auth-tabs">
+        <button id="tabLogin" class="auth-tab on" onclick="switchAuth('login')">Log in</button>
+        <button id="tabSignup" class="auth-tab" onclick="switchAuth('signup')">Sign up</button>
+      </div>
+      <div id="signupRow" style="display:none">
+        <input id="suUser" type="text" placeholder="Username (shown on leaderboard)" autocomplete="off" class="auth-in">
+      </div>
+      <input id="auEmail" type="email" placeholder="Email" autocomplete="email" class="auth-in">
+      <input id="auPass" type="password" placeholder="Password (6+ characters)" autocomplete="current-password" class="auth-in"
+        onkeydown="if(event.key==='Enter')authSubmit()">
+      <div id="authMsg" class="auth-msg"></div>
+      <button id="authGo" class="help-close" onclick="authSubmit()">Log in</button>`;
   }
   openModal("accountModal");
 }
+function switchAuth(which){
+  authTab = which;
+  document.getElementById("tabLogin").classList.toggle("on", which==="login");
+  document.getElementById("tabSignup").classList.toggle("on", which==="signup");
+  document.getElementById("signupRow").style.display = which==="signup" ? "block" : "none";
+  document.getElementById("authGo").textContent = which==="signup" ? "Create account" : "Log in";
+  authMsg("");
+}
+function authSubmit(){
+  const email = document.getElementById("auEmail").value;
+  const pass  = document.getElementById("auPass").value;
+  if(authTab==="signup") doSignup(document.getElementById("suUser").value, email, pass);
+  else doLogin(email, pass);
+}
+function escapeHtml(s){ return String(s||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 
 /* ---------- modes ---------- */
 function startDaily(){
@@ -3532,9 +3625,8 @@ function removePlayer(id){
 function lockIn(){
   locked = true;
   if(mode === "daily"){
-    const {score100} = computeScore();
     save({chain:chain.map(p=>p.id), posMap, done:true});
-    recordDaily(score100);
+    if(sb && user){ submitDaily().then(()=>render()); }
   }
   render();
 }
@@ -3594,7 +3686,6 @@ function renderResult(){
         <div class="score-val"><div class="n">${score100}</div><div class="o">/ 100</div></div>
       </div>
       <div class="grade" style="color:${gcolor}">${grade}</div>
-      <div class="pct">You beat <b>${pct}%</b> of the simulated field</div>
 
       <div class="result-lineup">`;
   rows.forEach(r=>{
@@ -3617,7 +3708,8 @@ function renderResult(){
       html += `<button class="lock" style="margin-top:10px;background:var(--surface2);color:var(--text)" onclick="openAccount()">Sign in to save your streak</button>`;
     }
     html += `<div class="best-note">Your total: ${total.toFixed(1)} PRA · Best possible today: ~${best.toFixed(1)}</div>
-      <div class="countdown" id="cd"></div>`;
+      <div class="countdown" id="cd"></div>
+      <div id="lbBox" class="lb-box"></div>`;
   }
   html += `</div>`;
 
@@ -3650,7 +3742,32 @@ function renderResult(){
   }
 
   app.innerHTML = html;
-  if(mode === "daily") tickCountdown();
+  if(mode === "daily"){ tickCountdown(); renderLeaderboard(); }
+}
+
+async function renderLeaderboard(){
+  const box = document.getElementById("lbBox");
+  if(!box) return;
+  if(!sb){ box.innerHTML = `<div class="lb-note">Sign-in &amp; leaderboard run on the live site.</div>`; return; }
+  box.innerHTML = `<div class="lb-note">Loading today's leaderboard…</div>`;
+  try{
+    const { data, error } = await sb.from("scores").select("username,score").eq("day",todayStr).order("score",{ascending:false}).limit(100);
+    if(error || !data){ box.innerHTML = ""; return; }
+    const N = data.length;
+    let head = "";
+    if(user){
+      const mine = computeScore().score100;
+      const beat = data.filter(r=>r.score < mine).length;
+      const pct = N>1 ? Math.round(beat/N*100) : 100;
+      head = `<div class="pct">You beat <b>${pct}%</b> of ${N} player${N===1?"":"s"} today</div>`;
+    }else{
+      head = `<div class="lb-note"><button class="linkbtn" onclick="openAccount()">Log in</button> to join the leaderboard &amp; save your streak.</div>`;
+    }
+    const rows = data.slice(0,10).map((r,i)=>
+      `<div class="lb-row"><span class="lb-rank">${i+1}</span><span class="lb-user">${escapeHtml(r.username)}</span><span class="lb-score">${r.score}</span></div>`
+    ).join("");
+    box.innerHTML = head + `<div class="lb-title">Today's leaderboard</div>` + (rows || `<div class="lb-note">Be the first to post a score today!</div>`);
+  }catch(e){ box.innerHTML = ""; }
 }
 
 function revealPerfect(){ revealed = true; render(); }
@@ -3661,7 +3778,7 @@ function shareResult(score, pct){
   const t = score/100;
   for(let i=0;i<5;i++) blocks += (i/5 < t) ? "🟦" : "⬛";
   const tag = mode==="daily" ? `Clutch Connections — ${todayStr}` : `Clutch Connections — Free play`;
-  const txt = `${tag}\n${L1}·${L2}\n${blocks} ${score}/100 · top ${100-pct}%\n${chainTxt}`;
+  const txt = `${tag}\n${L1}·${L2}\n${blocks} ${score}/100\n${chainTxt}`;
   if(navigator.share){
     navigator.share({text:txt}).catch(()=>copyText(txt));
   }else{
@@ -3691,13 +3808,17 @@ function tickCountdown(){
 /* ---------- boot ---------- */
 (function init(){
   loadTheme();
-  loadActiveUser();
   try{
     const link = document.createElement("link");
     link.rel = "icon"; link.href = FAVICON;
     document.head.appendChild(link);
   }catch(e){}
   startDaily();   // sets the round and restores today's finished game if any
+  loadSession();  // restore Supabase login if present (async; re-renders when ready)
+  if(!seenHelp()){
+    try{ document.getElementById("helpBg").classList.add("show"); }catch(e){}
+    markSeenHelp();
+  }
 })();
 </script>
 </body>
