@@ -3243,17 +3243,14 @@ async function doSignup(username, email, password){
   if(!email || !password || password.length<6){ authMsg("Enter an email and a password (6+ characters)."); return; }
   authBusy=true; authMsg("Creating account…");
   try{
-    const { data, error } = await sb.auth.signUp({ email, password });
+    const { data, error } = await sb.auth.signUp({ email, password, options:{ data:{ username } } });
     if(error){ authBusy=false; authMsg(error.message); return; }
-    const uid = (data.user && data.user.id) || (data.session && data.session.user && data.session.user.id);
-    const { error: perr } = await sb.from("profiles").insert({ id: uid, username });
-    if(perr){
+    if(!data.session){
       authBusy=false;
-      authMsg(/duplicate|unique/i.test(perr.message||"") ? "That username is taken — try another." : perr.message);
-      try{ await sb.auth.signOut(); }catch(e){}
+      authMsg("Account created, but couldn't sign in automatically. Make sure \"Confirm email\" is OFF in Supabase, then use Log in.");
       return;
     }
-    user = { id:uid, username, games:0, total:0, best:0, streak:0 };
+    user = { id:data.user.id, username, games:0, total:0, best:0, streak:0 };
     authBusy=false; closeModal("accountModal");
     if(mode==="daily" && locked) await submitDaily();
     await refreshUserStats(); render();
